@@ -1,0 +1,2 @@
+data_base /home/katod/projects/GSM/build/GSM
+voice /home/katod/projects/GSM/build/Voice/
