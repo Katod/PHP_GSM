@@ -5,6 +5,7 @@ ob_implicit_flush();
 error_reporting(0);
 
 require('phpagi.php');
+//require('client.php');
 require ('api/AES128.php');
 require ('api/SHClient.php');
 
@@ -55,32 +56,30 @@ while($row = $ret->fetchArray(SQLITE3_ASSOC))
   $agi->verbose($row['path'].$row['file'],1);
 }
 
-
-
 $path = "";
- // $agi->stream_file("/home/katod/projects/PHP_GSM/Voice/1_".$path);
+
 do
 {
-  $digit = $agi->wait_for_digit(20000);
-  $digit =  chr($digit['result']);
-  $agi->verbose("DEGIT =".chr($digit['result']),1);
+  $digit = $agi->stream_file("/home/katod/projects/PHP_GSM/Voice/1_".$path,'1234567890*#');
+
+  if($digit['result'] <= 0)
+  {
+    $digit = $agi->wait_for_digit(20000);
+  }
   
+  $digit = chr($digit['result']);
+
   if($digit == '*')
     $path = substr($path, 0, -1);
   else if($digit == '#')
+  {
     $path = "";
-  else
+  }
+  else 
+  {
     $path .= $digit;
- //  $agi->evaluate("S,/home/katod/projects/PHP_GSM/Voice/1_)");
-    fwrite(STDOUT, trim("STREAM FILE home/katod/projects/PHP_GSM/Voice/1_\"\" 0")."\n");
-    fflush($stdout);
-  //$agi->stream_file("/home/katod/projects/PHP_GSM/Voice/1_".$path);
-  // $result = $agi->get_data('beep', 3000, 20);
-  // $keys = $result['result'];
-
+  }
 } while(true);
-
-
 
 $agi->hangup();
 $db->close();

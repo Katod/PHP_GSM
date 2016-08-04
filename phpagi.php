@@ -1824,3 +1824,4 @@ class AGI
 
   $phpagi_error_handler_email = NULL;
 
+?>
