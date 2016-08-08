@@ -76,6 +76,64 @@ else
 
 
 
+
+
+
+
+
+    public function communWithClient()
+    {
+
+      $this->agi->verbose("Start Comunication",1);
+      $newCallPath = $this->callPath;
+      do
+      {
+        $digit = 0;
+        if($newCallPath != $this->callPath)
+        {
+          $digit = $this->agi->get_data($this->pathToVoice.$this->menuID."_".$newCallPath);//,'1234567890*#');
+          $this->callPath = $newCallPath;
+        }
+        if($digit['result'] <= 0)
+        {
+          $digit = $this->agi->wait_for_digit("20000");
+          if($digit == -1)
+            $this->agi->verbose("DIGIT NULL",1);
+        }
+        
+        $digit = chr($digit['result']);
+        if($digit == '*')
+        {
+          $newCallPath = substr($newCallPath, 0, -1);
+        }
+        else if($digit == '#')
+        {
+          $newCallPath = "";
+        }
+        else 
+        {
+          $checkNewPath =$newCallPath.$digit;
+
+          if($this->checkPath($newCallPath))
+            $newCallPath = $checkNewPath;
+        }
+      } while(true);
+    }
+
+
+
+
+
+
+
+
+
+
+
 //print_r($menu[0]['path']);
 $db->close();
 ?>
+
+
+
+
