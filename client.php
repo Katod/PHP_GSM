@@ -2,8 +2,13 @@
 
 require('phpagi.php');
 //require('client.php');
-require ('api/AES128.php');
-require ('api/SHClient.php');
+require_once ('/home/katod/projects/PHP_GSM/api/AES128.php');
+require_once ('/home/katod/projects/PHP_GSM/api/SHClient.php');
+
+define("HOST", "192.168.1.124");
+define("PORT", 55555);
+define("SECRET_KEY","0000000000000000");
+
 
 
 class MyDB extends SQLite3
@@ -24,7 +29,7 @@ class Client
     public $menu = array();
     private $agi; 
     private $db ;
-
+    private $shClient;
 
     public function __construct($db_path,$voice_path)
     {
@@ -39,6 +44,12 @@ class Client
         $this->agi->verbose($cid."TEST\n",1);
 
 
+        $this->shClient = new SHClient(HOST, PORT, SECRET_KEY);
+        if($this->shClient->run()){
+          $this->agi->verbose("CONNECT TO SERVER\n",1);
+        }else {
+          $this->agi->verbose("Error connect\n",1);
+        }
 
         if(!$this->db)
         {
@@ -103,28 +114,54 @@ class Client
 
     public function communWithClient()
     {
-
+      $oldPath = "start";
       $this->agi->verbose("Start Comunication",1);
       do
       {
-        $digit = $this->agi->stream_file($this->pathToVoice.$this->menuID."_".$this->callPath,'1234567890*#');
-        if($digit['result'] <= 0)
-        {
-          $digit = $this->agi->wait_for_digit(2000);
-          if($digit == 0)
-            $this->agi->verbose("DIGIT NULL",1);
-        }
+        //if($oldPath != $this->callPath)
+        //{
+
+        $menu_row = $this->getMenuByPath($this->callPath);
         
-        $digit = chr($digit['result']);
-        if($digit == '*')
+         if($menu_row['addr'] != '')
+         {
+           $addr = explode(":", $menu_row['addr']);
+           $type = $this->shClient->getItemType($addr[0], $addr[1]);
+            if($menu_row['device_state'] == '')
+            {
+              $state = $this->shClient->getDeviceState($addr[0], $addr[1],TRUE);
+              $this->agi->verbose("dimer lamp state=" . $state["state"] . "; value=" . $state["value"] . ";\n".$type,1);
+              $this->agi->stream_file($this->pathToVoice."files/".$type."/".$state['state'],'1234567890*#');
+            }
+            else
+            {
+              $this->agi->verbose("Id =".$addr[0]."sub-Id =".$addr[1]." state =".$menu_row['device_state'],1);
+              $devices = $this->shClient->setDeviceState((int)$addr[0],(int)$addr[1],$menu_row['device_state']);//(string)$menu_row['device_state']);
+              $this->agi->stream_file($this->pathToVoice."files/".$type."/".$menu_row['device_state'],'1234567890*#');
+            }
+
+            $this->callPath = substr($this->callPath, 0, -1);
+         }
+        
+        $digit = $this->agi->get_data($this->pathToVoice.$this->menuID."_".$this->callPath,8000,1);//'1234567890*#');
+
+         // $oldPath = $this->callPath;
+        //}
+       // else
+        //{
+        //  $digit = $this->agi->get_data(test,20000,1);
+        //}
+
+        $this->agi->verbose("DIGIT =".$digit['result']." Code=".$digit['code']." data =".$digit['data'],1);
+        if($digit['result'] == '*')
           $this->callPath = substr($this->callPath, 0, -1);
-        else if($digit == '#')
+        else if($digit['result'] == '' && $digit['data'] == '')
         {
           $this->callPath = "";
         }
         else 
         {
-          $newCallPath =$this->callPath.$digit;
+          $newCallPath =$this->callPath.$digit['result'];
 
           if($this->checkPath($newCallPath))
             $this->callPath = $newCallPath;
@@ -139,14 +176,24 @@ class Client
 
     public function checkPath($path)
     {
-      $isRightPath = false;
       foreach ($this->menu as $key => $value) 
       {
          if (trim($value['path']) == trim($path))
-          $isRightPath = true;
+          return true;
       }
-      return $isRightPath;
+      return false;
     }
+
+    public function getMenuByPath($path)
+    {
+      foreach ($this->menu as $key => $value) 
+      {
+        if (trim($value['path']) == trim($path))
+          return $value;      
+      }
+      return NULL;
+    }
+
 
 
 }

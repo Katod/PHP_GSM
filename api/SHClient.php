@@ -1,8 +1,11 @@
 <?php
 
+
+
 class SHClient {
     public $host = "127.0.0.1";
     public $port = "55555";
+	public $aes = NULL;
     public $aeskey = "";
     public $logFile = "";
     public $initClientDefValue = 0x7ef;
@@ -14,6 +17,7 @@ class SHClient {
     public $serverWithMessages = FALSE;
     public $saveXmlLogic = TRUE;
     public $keysFile = "/home/sh2/keys.txt";
+	public $debug = FALSE;
     
 
     public $connectionTimeOut = 5;//seconds
@@ -25,6 +29,10 @@ class SHClient {
     public $displayedDevices = array();
     
     public $devicesQuery = "";
+	public $stopListenEventsOnMsg = FALSE;
+	public $readFromBlockedSocket = FALSE;
+	
+	public $listenEventsDelay = 150000;
 
     private $bcmathExist = FALSE;
     private $xmlDoc = null;
@@ -33,7 +41,25 @@ class SHClient {
     private $runSuccess = FALSE;
     private $readSocketTimeout = 3;//seconds
     
-    private $eventCallbacks = array();
+    private $eventOnDeviceCallbacks = array();
+	private $eventOnMsgCallbacks = array();
+	
+	private $serverAnswer = "";
+	private $shCommandsList = array("update-cans",
+                          "update-can-log",
+                          "cmd-pn",
+                          "cmd-co",
+                          "cmd-ti",
+                          "cmd-qu"
+                          );
+/*
+		up - update cans
+        lo - read device log
+        ti - read device current time
+        co - read device compile time
+        pn - send PnP broadcast one
+        qu - exit
+*/ 	
 
     public function __construct($host = "",$port = "",$aeskey = "",$logfile = "",$xmlfile = ""){
         if($host != "") $this->host = $host;
@@ -42,6 +68,7 @@ class SHClient {
         $this->logFile = $logfile;
         $this->xmlFile = $xmlfile;
         if(function_exists("bcdiv")) $this->bcmathExist = TRUE;
+		$this->aes = new \AES128();
 
         if(defined('KEYS_FILE') && KEYS_FILE != "" && file_exists(KEYS_FILE) && is_readable(KEYS_FILE)) $this->keysFile = KEYS_FILE;
 
@@ -49,39 +76,47 @@ class SHClient {
     }
 
     public function __destruct(){
+    	$this->debug(__METHOD__);
+		//$this->debug($this->errors);
+
         if($this->connected()) {
             fclose($this->connectionResource);
             $this->connectionResource = null;
         }
+		
+		
         if(count($this->errors)) $this->logger(implode("\n", $this->errors));
-        unset($this);
     }
+	
+	public function clearErrors(){
+		$this->errors = array();
+	}
 
     public function run(){
         if(count($this->errors) > 0) return FALSE;
-        
+/*        
         if(!class_exists("AES128")){
-            $this->errors[] = "Class AES128 not found";
+            $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "Class AES128 not found";
             return FALSE;
         }
         if(!class_exists("DOMDocument")) {
-            $this->errors[] = "you must install domxml library, type in console: yum install php-dom";
+            $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "you must install domxml library, type in console: yum install php-dom";
             return FALSE;
         }
-/*
+
         if(!function_exists("bcdiv")) {
-            $this->errors[] = "you must install bcmath library, type in console: yum install php-bcmath";
+            $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "you must install bcmath library, type in console: yum install php-bcmath";
             return FALSE;
         }
 */
 /*
         if(trim($this->logFile) == ""){
-            $this->errors[] = "you must to pass the path of the log file";
+            $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "you must to pass the path of the log file";
             return FALSE;
         }
 
         if(trim($this->xmlFile) == ""){
-            $this->errors[] = "you must to pass the path of the file where xml logic will be kept";
+            $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "you must to pass the path of the file where xml logic will be kept";
             return FALSE;
         }
 */
@@ -89,7 +124,7 @@ class SHClient {
         if(!$this->connected()) return FALSE;
         $this->authorization();
         if(!$this->connected()) {
-            $this->errors[] = "Server authorization failed.";
+            $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "Server authorization failed";
             return FALSE;
         }
         
@@ -97,7 +132,7 @@ class SHClient {
             if($this->allowReadXmlLogic){
                 $this->readXmlLogic();
                 if(strpos($this->logicXml,"</smart-house>") === FALSE){
-                    $this->errors[] = "Couldn't get xml logic from smart-house server.";
+                    $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "Could not get xml logic from smart-house server.";
                     return FALSE;
                 }
             }elseif($this->xmlFile != "" && file_exists($this->xmlFile)) {
@@ -108,37 +143,65 @@ class SHClient {
         if($this->logicXml == "") $this->logicXml = "<?xml version='1.0' encoding='UTF-8'?><smart-house name=\"Умный дом\"></smart-house>";
 
 //begin load xml
-        $this->xmlDoc = new DOMDocument('1.0', "UTF-8");
+        $this->xmlDoc = new \DOMDocument('1.0', "UTF-8");
         $this->xmlDoc->formatOutput = TRUE;
         $this->xmlDoc->preserveWhiteSpace = FALSE;
 
         set_error_handler(function($number, $error){
             if (preg_match('/^DOMDocument::loadXML\(\): (.+)$/', $error, $m) === 1) {
-                throw new Exception($m[1]);
+                throw new \Exception($m[1]);
             }
         });
         
         try {
             $this->xmlDoc->loadXML($this->logicXml);
         }catch (Exception $e) {
-            $this->errors[] = $e->getMessage();
+            $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "parse xml error: " . $e->getMessage();
             return FALSE;
         }
         restore_error_handler();
 //end load xml
 
-        $this->xpath = new DOMXPath($this->xmlDoc);
+        $this->xpath = new \DOMXPath($this->xmlDoc);
         $this->runSuccess = TRUE;
         $this->getDisplayedDevices();
+        return TRUE;
+    }
+
+    public function run2(){
+    	$this->debug(__METHOD__);
+        if(count($this->errors) > 0) return FALSE;
+/*        
+        if(!class_exists("AES128")){
+            $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "Class AES128 not found";
+            return FALSE;
+        }
+		
+        if(!class_exists("DOMDocument")) {
+            $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "you must install domxml library, type in console: yum install php-dom";
+            return FALSE;
+        }
+
+*/ 
+        $this->connectToServer();
+        if(!$this->connected()) return FALSE;
+        $this->authorization();
+        if(!$this->connected()) {
+            $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "Server authorization failed";
+            return FALSE;
+        }
+		
+		$this->runSuccess = TRUE;
+		stream_set_blocking($this->connectionResource, 1);//set socket to block status
         return TRUE;
     }
 
     public function getAESKey(){
 
         if(file_exists($this->keysFile)){
-            if(!is_readable($this->keysFile)) $this->errors[] = "Нет прав на чтение файла: " . $this->keysFile;
+            if(!is_readable($this->keysFile)) $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "no read permissions of file: " . $this->keysFile;
 
-            if(!count($this->errors) && ($tmparr = file($this->keysFile)) === FALSE) $this->errors[] = "Ошибка чтения из файла: " . $this->keysFile;
+            if(!count($this->errors) && ($tmparr = file($this->keysFile)) === FALSE) $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "File read error: " . $this->keysFile;
             
             if(!count($this->errors) && count($tmparr)){
                 foreach($tmparr as $k=>$v){
@@ -158,9 +221,9 @@ class SHClient {
                     }
                 }
             }
-        }else $this->errors[] = "Не найден файл: " . $this->keysFile;
+        }else $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "File not found: " . $this->keysFile;
 
-        if($this->aeskey == "") $this->errors[] = "Секретный ключ не задан.";        
+        if($this->aeskey == "") $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "Secret key is not set";
     }
 //#######################################################################################################
     public function getDeviceState($id, $subid, $sendRequest = FALSE){
@@ -506,6 +569,7 @@ class SHClient {
 //find item with requested id and subid in xml and return type attribute value
     public function getItemType($id, $subid){
         $type = "";
+        if(is_null($this->xpath)) return $type;
         
         $query = '//item[(@id="' . (int)$id . '" and @sub-id="' . (int)$subid . '") or @addr="' . (int)$id . ':' . (int)$subid . '"]/@type';
         
@@ -532,6 +596,7 @@ class SHClient {
             if((int)$id > 0 && (int)$subid > 0) {
                 $entryAttributes["id"] = $id;
                 $entryAttributes["sub-id"] = $subid;
+				$entryAttributes["addr"] = $id . ":" . $subid;
                 $attrs = $entryAttributes;
             }
         }
@@ -582,94 +647,6 @@ class SHClient {
         return $this->logicXml;
     }
 
-    public function sendCommand($command = "update-cans", $readAnswer = TRUE){
-
-        $xmlcommands = array();
-        $xmlcommands["xmlStartLine"] = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-        $xmlcommands["xmlBeginCommand"] = '<smart-house-commands>' . "\n";
-        $xmlcommands["xmlEndCommand"] = "</smart-house-commands>\n";
-        $xmlcommands["getXMLConf"] = $xmlcommands["xmlStartLine"] . $xmlcommands["xmlBeginCommand"];
-        $xmlcommands["getXMLConf"] .= '<' . $command . ' />' . "\n";
-        $xmlcommands["getXMLConf"] .= $xmlcommands["xmlEndCommand"];
-
-        $serverAnswer = "";
-        $xml = $xmlcommands["getXMLConf"];
-
-        $xmlsize = strlen($xml);
-        $data = pack("L",$xmlsize) . $xml;
-
-        $this->sendToServer($data);
-
-        if($readAnswer && $this->connected()){
-/*
-            if($this->serverWithMessages){
-                $tmpdata = $this->fread(4);
-                if(!$tmpdata["success"]) return;
-                $arr = unpack("L",$tmpdata["data"]);
-                $length = $arr[1];
-    
-                $tmpdata = $this->fread($length);
-                if(!$tmpdata["success"]) return $serverAnswer;
-                if(strpos($tmpdata["data"], "max") !== FALSE) {
-                    $this->logger($tmpdata["data"]);
-                    $this->errors[] = $tmpdata["data"];
-                    return;
-                }
-            }
-*/
-
-            $j = 0;
-            while($serverAnswer == "" && $j < 10){
-                $data = $this->fread(10);
-                if(!$data["success"]) break;
-                $unpackData = unpack("Llength/C6c", $data["data"]);
-                $shHead = "";
-                for($i=1;$i<=6;$i++) $shHead .= chr($unpackData["c".$i]);
-        
-                if($shHead == "shcxml"){
-                    $line = $this->fread(4);
-                    if(!$line["success"]) break;
-                    $crc = unpack("L*f",$line["data"]);
-        
-                    $line = $this->fread(1);
-                    if(!$line["success"]) break;
-                    $addata = unpack("C*d",$line["data"]);
-        
-                    $line = $this->fread($unpackData["length"]-5);
-                    if(!$line["success"]) break;
-                }elseif($shHead == "messag"){
-                    $message = $this->fread($unpackData["length"]-6);
-                    if(!$message["success"]) break;
-                    if($message["data"] != "") {
-                        $this->errors[] = "Соединение сервером отклонено. Сообщение от сервера: " . $message["data"] . ".";
-                        break;
-                    }
-                }else {
-                    $tmpdata = $this->fread($unpackData["length"]-6);
-                    if(!$tmpdata["success"]) break;
-                    $serverAnswer = $tmpdata["data"];
-                }
-                $j++;
-            }
-            
-/*            
-            $tmpdata = $this->fread(4);
-            if(!$tmpdata["success"]) return $serverAnswer;
-            $arr = unpack("L",$tmpdata["data"]);
-            $length = $arr[1];
-
-            $shHead = $this->fread(6);
-            //print $shHead["data"] . "\n";//caninf
-
-            $tmpdata = $this->fread($length-6);
-            if(!$tmpdata["success"]) return $serverAnswer;
-            $serverAnswer = $tmpdata["data"];
-*/
-
-        }
-
-        return $serverAnswer;
-    }
 //begin get history of device
 //start-timet and end-timet must be unixtimestamp
 //method getDeviceLogs - get values by seconds
@@ -914,7 +891,9 @@ class SHClient {
             $totalLength -= 9;
             $bindata5 = $this->fread($totalLength);
             if(!$bindata5["success"]) return false;
-            $unpackedData5 = unpack("S*",$bindata5["data"]);
+			$packExp = "S*";
+			if(strpos($params["devtype"],"-sensor") === FALSE || $params["devtype"] == "door-sensor" || $params["devtype"] == "leak-sensor") $packExp = "C*";
+            $unpackedData5 = unpack($packExp,$bindata5["data"]);
             if($debug) $this->logger("values length: " . count($unpackedData5));
 
             $numValues = count($unpackedData5);
@@ -932,10 +911,17 @@ class SHClient {
                         }
                         break;
                     default:
-                        $v1 = bcdiv($v,256);
-                        $v2 = bcdiv($v,256,2);
-                        if($v1 >= 254) $value = null;
-                        else $value = $v2;
+						if(strpos($params["devtype"],"-sensor") === FALSE || $params["devtype"] == "door-sensor" || $params["devtype"] == "leak-sensor"){
+	                        if($v >= 254) $value = null;
+	                        else $value = bcdiv($v,256,2);
+							$value = $v;
+						}else {
+	                        $v1 = bcdiv($v,256);
+	                        $v2 = bcdiv($v,256,2);
+
+	                        if($v1 >= 254) $value = null;
+	                        else $value = $v2;
+						}
                         break;
                 }
                 //$time = bcmul(bcsub($toTime, bcmul($numValues, bcmul(60, $scale))), 1000);
@@ -959,7 +945,7 @@ class SHClient {
         if(array_key_exists($startIdx, $_SERVER["argv"])){
             $inParams = trim($_SERVER["argv"][$startIdx]);
             if($inParams == "") {
-                $this->errors[] = "input params not found";
+                $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "input params not found";
             }
         }
         $startIdx++;
@@ -967,7 +953,7 @@ class SHClient {
         if(array_key_exists($startIdx, $_SERVER["argv"])){
             $inParams2 = trim($_SERVER["argv"][$startIdx]);
             if($inParams2 == "") {
-                $this->errors[] = "input params not found";
+                $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "input params not found";
             }
         }
 
@@ -975,7 +961,7 @@ class SHClient {
             if(preg_match("/\d{1,4}\:\d{1,3}/", $inParams)){
                 $consoleParams["sender"] = $inParams;
                 list($consoleParams["senderID"], $consoleParams["senderSubID"]) = explode(":", $inParams);
-            }else $this->errors[] = "sender id not found";
+            }else $this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "sender id not found";
         }
         if(!count($this->errors)){
             $tmparr = str_split($inParams2, 2);
@@ -1040,7 +1026,390 @@ class SHClient {
         }
 
     }
-    
+
+	public function clientIsConnected() {
+		return $this->connected();
+	}
+
+//##########################################################################################################################
+    public function addEventOnMsgCallback($message, $callbackFunc, $argv = array(), $readAll = TRUE) {
+
+		if(array_key_exists($message, $this->eventOnMsgCallbacks)) return FALSE;
+
+		$data = array("callback"=>$callbackFunc, "argv"=>$argv, "readAll"=>$readAll);
+		if(!array_key_exists($message, $this->eventOnMsgCallbacks)) $this->eventOnMsgCallbacks[$message] = array($data);
+		else $this->eventOnMsgCallbacks[$message][] = $data;
+        
+        return TRUE;
+    }
+
+    public function removeEventOnMsgCallback($message) {
+		if(array_key_exists($message, $this->eventOnMsgCallbacks)) unset($this->eventOnMsgCallbacks[$message]);
+        return TRUE;
+    }
+
+    public function eventOnMsgCallbackExist($message) {
+		if(array_key_exists($message, $this->eventOnMsgCallbacks)) return TRUE;
+		return FALSE;
+    }
+
+    public function listenEventsOnMsg() {
+    	if(!count($this->eventOnMsgCallbacks)) return false;
+    	
+		while (!$this->stopListenEventsOnMsg && $this->connected() && count($this->eventOnMsgCallbacks)) {
+			$data = $this->readBlockedSocket(10);
+	        $unpackData = @unpack("Llength/C6c", $data);
+			$leftLength = $unpackData["length"]-6;
+	        $msg = "";
+	        for($i=1;$i<=6;$i++) $msg .= chr($unpackData["c".$i]);
+			//$this->debug($msg);
+/*	        	
+	        foreach ($this->eventOnMsgCallbacks as $event => $eventElements) {
+ 				$this->debug($event);
+				foreach ($eventElements as $eventData) {
+					$this->debug($eventData["callback"][1]);
+				}
+	        }
+*/
+			
+	        foreach ($this->eventOnMsgCallbacks as $event => $eventElements) {
+				if(preg_match("/[a-zA-Z0-9]{3,}/", $msg) && ($event == $msg || $event == "unknownMsg")) {
+					foreach ($eventElements as $eventData) {
+						if($eventData["readAll"]){
+							$data = NULL;
+						    if($leftLength > 0) $data = $this->readBlockedSocket($leftLength);
+							if(!is_null($eventData["callback"])) call_user_func($eventData["callback"], $data, $eventData["argv"], $msg);
+							$leftLength = 0;
+						}elseif(!is_null($eventData["callback"])) {
+							 call_user_func($eventData["callback"], $leftLength, $eventData["argv"], $msg);//inner callback for shclient class
+							 $leftLength = 0;
+						}
+					}
+					break;
+				}elseif(!preg_match("/[a-zA-Z0-9]{3,}/", $msg) && $event == "dev-event") {
+					foreach ($eventElements as $eventData) {
+						$devState = $this->onDeviceEvent($data);
+						if(!is_null($devState)){
+							$leftLength = 0;
+							if(!is_null($eventData["callback"])){
+								call_user_func($eventData["callback"], $devState, $eventData["argv"]);
+							}
+						}
+					}
+					break;
+				}
+	        }
+			if($leftLength > 0) $dataTmp = $this->readBlockedSocket($leftLength);
+			if($this->listenEventsDelay > 0) usleep($this->listenEventsDelay);
+		}
+    }
+
+    public function sendCommandToSH($command, $callback = NULL) {
+        $xml = "";
+		switch ($command) {
+			case 'get-dev-info':
+		        $xml .= '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<smart-house-commands>' . "\n";
+		        $xml .= "<get-dev-info />\n";
+		        $xml .= "</smart-house-commands>\n";
+				
+				if(!is_null($callback)) $this->addEventOnMsgCallback("devinf", $callback);
+				break;
+			case 'get-events':
+		        $xml .= '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<smart-house-commands>' . "\n";
+		        $xml .= "<get-shc retranslate-udp=\"yes\" />\n";
+		        $xml .= "</smart-house-commands>\n";
+				
+				if(!is_null($callback)) {
+					$this->addEventOnMsgCallback("dev-event", $callback);
+				}
+
+				$methodName = "onGetXmlLogic";
+				$callback = array($this, $methodName);
+				$this->addEventOnMsgCallback("shcxml", $callback, array(), FALSE);
+
+				break;
+			case 'get-shc':
+		        $xml .= '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<smart-house-commands>' . "\n";
+		        $xml .= "<get-shc />\n";
+		        $xml .= "</smart-house-commands>\n";
+
+				$argv = array();
+				if(!is_null($callback)) {
+					$argv[] = $callback;
+				}
+				$methodName = "onGetXmlLogic";
+				$callback = array($this, $methodName);
+				$this->addEventOnMsgCallback("shcxml", $callback, $argv, FALSE);
+
+				break;
+			case 'retranslate-udp':
+		        $xml .= '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<smart-house-commands>' . "\n";
+		        $xml .= "<get-shc retranslate-udp=\"yes\" />\n";
+		        $xml .= "</smart-house-commands>\n";
+
+				$argv = array();
+				if(!is_null($callback)) {
+					$argv[] = $callback;
+				}
+				$methodName = "onGetXmlLogic";
+				$callback = array($this, $methodName);
+				$this->addEventOnMsgCallback("shcxml", $callback, $argv, FALSE);
+
+				break;
+		}
+
+		if($xml != "") {
+	        $xmlsize = strlen($xml);
+	        $data = pack("L",$xmlsize) . $xml;
+	        $this->sendToServer($data);
+
+		}
+    }
+
+    public function sendCommand($command = "update-cans", $readAnswer = TRUE) {
+
+		if(count($this->errors)) return FALSE;
+/*		
+		if(!in_array($command, $this->shCommandsList)){
+			$this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . "command not found";
+			return FALSE;
+		}
+*/
+		$this->debug(__METHOD__ . " line: " . __LINE__);
+
+        $xmlcommands = array();
+        $xmlcommands["xmlStartLine"] = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+        $xmlcommands["xmlBeginCommand"] = '<smart-house-commands>' . "\n";
+        $xmlcommands["xmlEndCommand"] = "</smart-house-commands>\n";
+        $xmlcommands["getXMLConf"] = $xmlcommands["xmlStartLine"] . $xmlcommands["xmlBeginCommand"];
+		if(in_array($command, $this->shCommandsList)) {
+        	$xmlcommands["getXMLConf"] .= '<' . $command . ' />' . "\n";
+		}else {
+			$xmlcommands["getXMLConf"] .= $command . "\n";
+		}
+        $xmlcommands["getXMLConf"] .= $xmlcommands["xmlEndCommand"];
+		
+
+        $serverAnswer = "";
+        $xml = $xmlcommands["getXMLConf"];
+
+        $xmlsize = strlen($xml);
+        $data = pack("L",$xmlsize) . $xml;
+
+        $this->sendToServer($data);
+
+        if($command == "update-cans" && $readAnswer) {
+			$methodName = "onGetCanInfo";
+			$callback = array($this, $methodName);
+			$this->addEventOnMsgCallback("caninf", $callback);
+			
+			$this->listenEventsOnMsg();
+			$serverAnswer = $this->serverAnswer;
+		}
+
+        return $serverAnswer;
+    }
+
+	public function stopListenEvents() {
+		$this->stopListenEventsOnMsg = TRUE;
+	}
+	
+	private function onGetXmlLogic($leftLength, $argv = NULL) {
+		$this->debug(__METHOD__);
+		$callback = NULL;
+		if(!is_null($argv) && is_array($argv) && count($argv) > 0) $callback = $argv[0];
+
+	    $data = $this->readBlockedSocket(4);
+	    $crc = unpack("L*f",$data);
+
+		//$this->debug("crc");
+		//$this->debug($crc);
+	
+	    $data = $this->readBlockedSocket(1);
+	    $addata = unpack("C*d",$data);
+
+	    //$this->debug("after crc");
+	    //$this->debug($addata);
+
+	    $this->initClientID = $this->initClientDefValue - $addata["d1"];
+
+	    $data = $this->readBlockedSocket($leftLength-5);
+	    $this->logicXml = $data;
+	    
+		//$this->debug($this->logicXml);
+
+   		$this->getDomXml();
+
+		if(!is_null($callback) && is_array($callback) && count($callback) == 2){
+			call_user_func($callback, $this->logicXml);
+		}
+
+	}
+	
+	private function onGetUnknownMsg() {
+		$this->debug(__METHOD__);
+		//$this->debug(func_num_args());
+		//$args = func_get_args();
+		//$this->debug($args);
+		
+		//$this->stopListenEvents();
+	}
+	
+	private function onGetCanInfo($data){
+		$this->debug(__METHOD__);
+		$this->serverAnswer = $data;
+		$this->stopListenEvents();
+	}
+
+    private function onDeviceEvent($headerData) {
+		$devState = NULL;
+		
+        $unpackData = @unpack("S2s/C4c/Slength", $headerData);
+		//$this->debug($unpackData);
+		if(!is_array($unpackData) || count($unpackData) != 7) return NULL;
+				
+		$readLength = $unpackData["length"];
+
+        if($unpackData["c1"] == 7){
+            //begin get events
+            $ad = $this->readBlockedSocket($readLength);
+            $values = array();
+            $addr = $unpackData["s1"] . ":" . $unpackData["c3"];
+            $itemType = $this->getItemType((int)$unpackData["s1"], (int)$unpackData["c3"]);
+
+            if($readLength == 1){
+                $addata = unpack("C*value",$ad);
+                $values[] = $addata["value1"];
+            }elseif($readLength == 2 && $itemType != "dimer-lamp" && strpos($itemType, "sensor") === FALSE){
+                $addata = unpack("C*value",$ad);
+                $values[] = $addata["value1"];
+            }elseif($readLength == 2 && $itemType == "dimer-lamp"){
+                $addata = unpack("C*value",$ad);
+                foreach($addata as $v) $values[] = $v;
+
+                if(array_key_exists(1, $values)) {
+                    if($this->bcmathExist) $values[1] = round(bcdiv($values[1], 2.5));
+                    else $values[1] = round($values[1]/2.5);
+                }
+                
+            }elseif($readLength == 2){
+                $addata = unpack("S*value",$ad);
+                if($this->bcmathExist){
+                    if($addata["value1"] > 32768) $value = bcdiv(bcsub(65536, $addata["value1"]), -256, 2);
+                    else $value = bcdiv($addata["value1"], 256, 2);
+                }else {
+                    if($addata["value1"] > 32768) $value = round((double)((65536-$addata["value1"])/-256), 2);
+                    else $value = round((double)($addata["value1"]/256), 2);
+                }
+                $values[] = $value;
+            }elseif($readLength > 2){
+                $addata = unpack("C*value",$ad);
+                foreach($addata as $v) $values[] = $v;
+            }
+
+            if(count($values) > 0){
+            	$devState = array(array("addr"=>$addr, "type"=>$itemType, "event"=>1, "values"=>$values));
+                $this->devicesStatesStore[$addr] = $values;
+            }
+			//end get events
+        }elseif($unpackData["c1"] == 15){
+			//begin get requested devices state
+			while($readLength > 0) {
+                $rData = $this->readBlockedSocket(2);
+                $readLength -= 2;
+                $ucanData = unpack("Cucanid/Clength",$rData);
+                $tmpData = $this->readBlockedSocket($ucanData["length"]);
+                $readLength -= $ucanData["length"];
+                $values = array();
+                $addr = $unpackData["s1"] . ":" . $ucanData["ucanid"];
+
+                $itemType = $this->getItemType((int)$unpackData["s1"], (int)$ucanData["ucanid"]);
+                
+                if($ucanData["length"] == 1){
+                    $addata = unpack("C*value",$tmpData);
+                    $values[] = $addata["value1"];
+                }elseif($ucanData["length"] == 2 && $itemType != "dimer-lamp" && strpos($itemType, "sensor") === FALSE){
+                    $addata = unpack("C*value",$tmpData);
+                    $values[] = $addata["value1"];
+                }elseif($ucanData["length"] == 2 && $itemType == "dimer-lamp"){
+                    $addata = unpack("C*value",$tmpData);
+                    foreach($addata as $v) $values[] = $v;
+
+                    if(array_key_exists(1, $values)) {
+                        if($this->bcmathExist) $values[1] = round(bcdiv($values[1], 2.5));
+                        else $values[1] = round($values[1]/2.5);
+                    }
+                }elseif($ucanData["length"] == 2){
+                    $addata = unpack("S*value",$tmpData);
+
+                    if($this->bcmathExist){
+                        if($addata["value1"] > 32768) $value = bcdiv(bcsub(65536, $addata["value1"]), -256, 2);
+                        else $value = bcdiv($addata["value1"], 256, 2);
+                    }else {
+                        if($addata["value1"] > 32768) $value = round((double)((65536-$addata["value1"])/-256), 2);
+                        else $value = round((double)($addata["value1"]/256), 2);
+                    }
+                    $values[] = $value;
+                }elseif($ucanData["length"] > 2){
+                    $addata = unpack("C*value",$tmpData);
+                    foreach($addata as $v) $values[] = $v;
+                }
+				
+                if(count($values) > 0) {
+                	if(!is_array($devState)) $devState = array();
+					$devState[] = array("addr"=>$addr, "type"=>$itemType, "event"=>0,  "values"=>$values);
+                    $this->devicesStatesStore[$addr] = $values;
+                }
+            }
+			//end get requested devices state
+        }
+        
+        return $devState;
+    }
+
+    private function getDomXml($xml = "") {
+    	if($xml == "") $xml = $this->logicXml;
+
+        $logicXml = str_replace("&amp;","#amp;",$xml);
+        $logicXml = str_replace("&","&amp;",$logicXml);
+        $logicXml = str_replace("#amp;","&amp;",$logicXml);
+
+        $this->xmlDoc = new \DOMDocument('1.0', "UTF-8");
+        $this->xmlDoc->formatOutput = TRUE;
+        $this->xmlDoc->preserveWhiteSpace = FALSE;
+
+		libxml_use_internal_errors(true);
+		        
+		if(!$this->xmlDoc->loadXML($logicXml)){
+			foreach (libxml_get_errors() as $error) {
+		        $errorMsg = "";
+				switch ($error->level) {
+			        case LIBXML_ERR_WARNING:
+			            $errorMsg .= "Warning " . $error->code . ": ";
+			            break;
+			         case LIBXML_ERR_ERROR:
+			            $errorMsg .= "Error " . $error->code . ": ";
+			            break;
+			        case LIBXML_ERR_FATAL:
+			            $errorMsg .= "Fatal Error " . $error->code . ": ";
+			            break;
+			    }
+
+				$errorMsg .= trim($error->message) . "  Line: $error->line" . "  Column: $error->column";
+
+            	$this->errors[] = __METHOD__ . " line: " . __LINE__ . " " . $errorMsg;
+			}
+		    libxml_clear_errors();
+			$this->xmlDoc = NULL;
+			$this->xpath = NULL;
+            return FALSE;
+		}
+		
+        $this->xpath = new \DOMXPath($this->xmlDoc);
+    }
+
+//##########################################################################################################################
+	
 //get single device state
     private function readDeviceState($id, $subid){
         $resultData = array();
@@ -1254,11 +1623,10 @@ class SHClient {
             $result = $errno . " " . $errstr;
             $this->logger($result);
             $this->connectionResource = NULL;
-            $msg = "No connection with shs server";
+            $msg = __METHOD__ . " line: " . __LINE__ . " No connection to shs server " . $this->host . ":" . $this->port;
             $this->errors[] = $msg;
+			$this->debug($msg);
             //throw new Exception ($msg);
-        }else {
-            stream_set_blocking($this->connectionResource, 0);
         }
     }
 
@@ -1268,14 +1636,14 @@ class SHClient {
                 if(!fwrite($this->connectionResource, $data)){
                     $this->disconnect();
                     $this->logger("Couldn't write to socket data: " . $data);
-                    $msg = "Couldn't write to socket data";
+                    $msg = __METHOD__ . " line: " . __LINE__ . " Couldn't write to socket data";
                     $this->errors[] = $msg;
                     //throw new Exception ($msg);
                 }
             } catch(Exception $e){
                 $this->disconnect();
                 $this->logger("Exception appeared. Couldn't write to socket next data: " . $data);
-                $msg = "Exception appeared. Couldn't write to socket data. " . $e->getMessage();
+                $msg = __METHOD__ . " line: " . __LINE__ . " " . "Exception appeared. Couldn't write to socket data. " . $e->getMessage();
                 $this->errors[] = $msg;
                 //throw new Exception ($msg);
             }
@@ -1284,17 +1652,14 @@ class SHClient {
 
     private function authorization(){
         if($this->connected()){
-            stream_set_blocking($this->connectionResource, 1);
             $data = $this->fread(16);
             if($data["success"]){
-                stream_set_blocking($this->connectionResource, 0);
     
-                $aes = new AES128();
-                $key=$aes->makeKey($this->aeskey);
-                $encrypted=$aes->blockEncrypt($data["data"], $key);
+                $key = $this->aes->makeKey($this->aeskey);
+                $encrypted = $this->aes->blockEncrypt($data["data"], $key);
                 fwrite($this->connectionResource, $encrypted);
             }else {
-                $error = "couldn't read data for authorization";
+                $error = __METHOD__ . " line: " . __LINE__ . " " . "could not read data for authorization";
                 $this->errors[] = $error;
                 $this->logger($error);
                 $this->disconnect();
@@ -1305,25 +1670,48 @@ class SHClient {
     private function fread($size){
         $success = TRUE;
         $res = "";
-        stream_set_timeout($this->connectionResource,$this->readSocketTimeout);
-        $info = stream_get_meta_data($this->connectionResource);
-        set_time_limit(20);
-        while(($size - strlen($res)) > 0 && (!$info['timed_out']) && (!feof($this->connectionResource))){
-            $res .= fread($this->connectionResource, $size-strlen($res));
-            $info = stream_get_meta_data($this->connectionResource);
-        }
-        set_time_limit(30);
-        if($info['timed_out'] || feof($this->connectionResource)) {
-            $success = FALSE;
-            //throw new Exception ("Read from socket timed out");
-        }
-        if(($size != strlen($res))) {
-            $success = FALSE;
-            //throw new Exception ("Couldn't read required number of bytes from socket");
-        }
+		if($this->readFromBlockedSocket) {
+	        while(($size - strlen($res)) > 0 && (!feof($this->connectionResource))){
+	            $res .= fread($this->connectionResource, $size-strlen($res));
+	        }
+		}else {
+	        stream_set_blocking($this->connectionResource, 0);//set socket to nonblock status
+	        $info = stream_get_meta_data($this->connectionResource);
+	        //set_time_limit(20);
+	        while(($size - strlen($res)) > 0 && (!$info['timed_out']) && (!feof($this->connectionResource))){
+	            $res .= fread($this->connectionResource, $size-strlen($res));
+	            $info = stream_get_meta_data($this->connectionResource);
+	        }
+	        //set_time_limit(30);
+	        if($info['timed_out'] || feof($this->connectionResource)) {
+	            $success = FALSE;
+	            //throw new Exception ("Read from socket timed out");
+	        }
+	        if(($size != strlen($res))) {
+	            $success = FALSE;
+	            //throw new Exception ("Couldn't read required number of bytes from socket");
+	        }
+			stream_set_blocking($this->connectionResource, 1);//set socket to block status
+		}
         
         return array("success"=>$success,"data"=>$res);
     }
+
+    private function readBlockedSocket($size){
+    	//$this->debug(__METHOD__ . " size:" . $size);
+    	if($size > 300000) return "";
+        $res = "";
+        while(($size - strlen($res)) > 0 && (!feof($this->connectionResource))){
+            $res .= fread($this->connectionResource, $size-strlen($res));
+        }
+        return $res;
+    }
+
+	private function debug($msg = ""){
+		if(is_array($msg)) $msg = print_r($msg, 1);
+		elseif(!is_string($msg)) $msg = var_export($msg, TRUE);
+		if($this->debug) print date("Y-m-d H:i:s") . "\t" . $msg . "\n";
+	}
 
 
     private function connected() {
@@ -1333,8 +1721,10 @@ class SHClient {
                 // the socket is valid but we are not connected anymore
                 fclose($this->connectionResource);
                 $this->connectionResource = NULL;
-                $error = "Connection closed by server. EOF caught while checking if connected.";
-                $this->errors[] = $error;
+				$msg = __METHOD__ . " line: " . __LINE__ . " " . "Connection closed by server. EOF caught while checking if connected.";
+				//$this->debug($msg);
+				//$this->debug($sock_status);
+                $this->errors[] = $msg;
 
                 //throw new Exception ($error);
 
