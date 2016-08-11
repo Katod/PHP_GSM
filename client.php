@@ -1,4 +1,4 @@
-<?php
+ашс<?php
 
 require('phpagi.php');
 //require('client.php');
@@ -8,6 +8,7 @@ require_once ('/home/katod/projects/PHP_GSM/api/SHClient.php');
 define("HOST", "192.168.1.124");
 define("PORT", 55555);
 define("SECRET_KEY","0000000000000000");
+define("REPEAT_TIME",50000);
 
 
 
@@ -42,14 +43,11 @@ class Client
         $cid = $this->agi->request["agi_callerid"];
 
         $this->agi->verbose($cid."TEST\n",1);
+        $this->agi->verbose($_SERVER['argv'][1]." = ARG\n",1);
+      
+       // $this->agi->verbose($_SERVER['argv']."ARGV\n",1);
+        // SHClient Create
 
-
-        $this->shClient = new SHClient(HOST, PORT, SECRET_KEY);
-        if($this->shClient->run()){
-          $this->agi->verbose("CONNECT TO SERVER\n",1);
-        }else {
-          $this->agi->verbose("Error connect\n",1);
-        }
 
         if(!$this->db)
         {
@@ -58,9 +56,15 @@ class Client
         else 
         {
           $this->agi->verbose("Opened database successfully\n",1);
-         
+        
 
-         if($ret = $this->db->query("SELECT id FROM clients WHERE phone_number = ".$cid.";\n"))
+        if($_SERVER['argv'][1] != NULL)
+        {
+          $this->menuID = $_SERVER['argv'][1];
+        }
+        else
+        {
+          if($ret = $this->db->query("SELECT id FROM clients WHERE phone_number = ".$cid.";\n"))
          //if($ret = $this->db->query("SELECT id FROM clients WHERE phone_number = 12345222;\n"))
          {
             $row = $ret->fetchArray(SQLITE3_ASSOC);
@@ -73,7 +77,7 @@ class Client
             else
             {
               // PIN CODE CHECK 
-              $r=$this->agi->get_data('hello-world',14000,6);
+              $r=$this->agi->get_data('hello-world',14000,6); // Add voice enter pin 
               $this->agi->verbose("Result = ".$r['result'],1);
 
               $ret = $this->db->query("SELECT id FROM clients WHERE PIN = ".$r['result'].";\n");
@@ -91,6 +95,7 @@ class Client
               }
             }
          }
+        }
 
           if($this->menuID != '')
           {
@@ -103,10 +108,26 @@ class Client
                 $this->menu[] = $row;
                }
              }
+      
+             $this->shClient = new SHClient(HOST, PORT, SECRET_KEY);
+             
+              if($this->shClient->run())
+              {
+                $this->agi->verbose("CONNECT TO SERVER\n",1);
+              }
+              else 
+              {
+                $this->agi->verbose("Error connect\n",1);
+                $this->agi->stream_file($this->pathToVoice."files/".$type."/"."CONNECT_ERROR");
+                //$this->agi->hangup();
+              }
           }
           else
              $this->agi->verbose("OBJECT DNT CONSTRUCT",1);
         }
+
+
+
 
       $this->agi->verbose("FINISH Construc ".implode(",", $this->menu),1);
       $this->db->close();
@@ -120,7 +141,6 @@ class Client
       {
         //if($oldPath != $this->callPath)
         //{
-
         $menu_row = $this->getMenuByPath($this->callPath);
         
          if($menu_row['addr'] != '')
@@ -130,24 +150,31 @@ class Client
             if($menu_row['device_state'] == '')
             {
               $state = $this->shClient->getDeviceState($addr[0], $addr[1],TRUE);
-              $this->agi->verbose("dimer lamp state=" . $state["state"] . "; value=" . $state["value"] . ";\n".$type,1);
-              $this->agi->stream_file($this->pathToVoice."files/".$type."/".$state['state'],'1234567890*#');
+              //$state = $this->shClient->getDeviceState($addr[0], $addr[1],TRUE);
+
+              $this->agi->verbose("state=" . $state["state"] . ";\n".$type,1);
+            
+             // if($state["state"] != null)
+             // {
+             //    $state["state"] = "undefined";
+             //  }
+            $this->agi->stream_file($this->pathToVoice."files/".$type."/".$state['state'],'*#');
             }
             else
             {
-              $this->agi->verbose("Id =".$addr[0]."sub-Id =".$addr[1]." state =".$menu_row['device_state'],1);
-              $devices = $this->shClient->setDeviceState((int)$addr[0],(int)$addr[1],$menu_row['device_state']);//(string)$menu_row['device_state']);
-              $this->agi->stream_file($this->pathToVoice."files/".$type."/".$menu_row['device_state'],'1234567890*#');
+              //$this->agi->verbose("Id =".$addr[0]."sub-Id =".$addr[1]." state =".$menu_row['device_state'],1);
+              $devices = $this->shClient->setDeviceState((int)$addr[0],(int)$addr[1],["state"=>$menu_row['device_state']]);
+              $this->agi->stream_file($this->pathToVoice."files/".$type."/".$menu_row['device_state'],'*#');
             }
 
             $this->callPath = substr($this->callPath, 0, -1);
          }
         
-        $digit = $this->agi->get_data($this->pathToVoice.$this->menuID."_".$this->callPath,8000,1);//'1234567890*#');
+        $digit = $this->agi->get_data($this->pathToVoice.$this->menuID."_".$this->callPath,REPEAT_TIME,1);//'1234567890*#');
 
-         // $oldPath = $this->callPath;
+        // $oldPath = $this->callPath;
         //}
-       // else
+        // else
         //{
         //  $digit = $this->agi->get_data(test,20000,1);
         //}
@@ -194,7 +221,15 @@ class Client
       return NULL;
     }
 
-
-
+     public function getMenuPosiblePath($path)
+     {
+      $result = array();
+      foreach ($this->menu as $key => $value) 
+      {
+        if (trim($value['path']) == trim($path))
+          return $value;      
+      }
+      return NULL; 
+     }
 }
 ?>

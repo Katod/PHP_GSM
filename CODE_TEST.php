@@ -10,7 +10,6 @@ define("PORT", 55555);
 define("SECRET_KEY","0000000000000000");
 
 
-echo "CONNECT SUCCES\n";
 
 require_once 'api/AES128.php';
 require_once 'api/SHClient.php';
@@ -18,14 +17,15 @@ require_once 'api/SHClient.php';
 $debug = TRUE;
 //$pCity = 34300;
 //$pDev = '135:220';
-
+print_r($argv);
 //begin code#################################################################################
 $shClient = new SHClient(HOST, PORT, SECRET_KEY);
 if($shClient->run()){
 	echo "CONNECT SUCCES\n";
-	    $devices = $shClient->setDeviceState((int)765,(int)7,"1");
-    print_r($devices);
-    print "\n";
+	    //$devices = $shClient->getDeviceStateByAddr("765:8", TRUE);
+	//$devices = $shClient->getDeviceStateByAddr("765:8");
+    //print_r($devices);
+
 }else {
     print implode("\n", $shClient->errors) . "\n";
 }

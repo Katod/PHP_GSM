@@ -27,6 +27,7 @@ class SHClient {
     public $devicesStatesStore = array();
     public $devicesEventsStore = array();
     public $displayedDevices = array();
+	public $devicesStore = array();
     
     public $devicesQuery = "";
 	public $stopListenEventsOnMsg = FALSE;
@@ -52,6 +53,7 @@ class SHClient {
                           "cmd-ti",
                           "cmd-qu"
                           );
+	private $retranslateUdpSent = FALSE;
 /*
 		up - update cans
         lo - read device log
@@ -76,7 +78,7 @@ class SHClient {
     }
 
     public function __destruct(){
-    	$this->debug(__METHOD__);
+    	//$this->debug(__METHOD__);
 		//$this->debug($this->errors);
 
         if($this->connected()) {
@@ -231,9 +233,12 @@ class SHClient {
         $tmpstate = array();
         
         $index = (int)$id . ":" . (int)$subid;
-        if(!array_key_exists($index, $this->devicesStatesStore) || $sendRequest) {
-            if($this->runSuccess) $tmpstate = $this->requestDeviceState((int)$id, (int)$subid);
-        }else $tmpstate = $this->devicesStatesStore[$index];
+       // if(!array_key_exists($index, $this->devicesStatesStore) || $sendRequest) {
+            if($this->runSuccess)
+            {
+                $tmpstate = $this->requestDeviceState((int)$id, (int)$subid);
+            }
+      //  }else $tmpstate = $this->devicesStatesStore[$index];
 
         $deviceType = $this->getItemType($id, $subid);
         $length = count($tmpstate);
@@ -255,11 +260,6 @@ class SHClient {
         }
         if(!array_key_exists("state", $state)) $state["state"] = "";
         return $state;
-    }
-
-    public function getDeviceStateByAddr($addr, $sendRequest = FALSE){
-        list($id, $subid) = explode(":", $addr);
-        return $this->getDeviceState($id, $subid, $sendRequest);
     }
 
     public function getDevicesState($sendRequest = FALSE) {
@@ -1102,6 +1102,7 @@ class SHClient {
 			if($leftLength > 0) $dataTmp = $this->readBlockedSocket($leftLength);
 			if($this->listenEventsDelay > 0) usleep($this->listenEventsDelay);
 		}
+		$this->stopListenEventsOnMsg = FALSE;
     }
 
     public function sendCommandToSH($command, $callback = NULL) {
@@ -1115,18 +1116,20 @@ class SHClient {
 				if(!is_null($callback)) $this->addEventOnMsgCallback("devinf", $callback);
 				break;
 			case 'get-events':
-		        $xml .= '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<smart-house-commands>' . "\n";
-		        $xml .= "<get-shc retranslate-udp=\"yes\" />\n";
-		        $xml .= "</smart-house-commands>\n";
-				
 				if(!is_null($callback)) {
 					$this->addEventOnMsgCallback("dev-event", $callback);
 				}
-
-				$methodName = "onGetXmlLogic";
-				$callback = array($this, $methodName);
-				$this->addEventOnMsgCallback("shcxml", $callback, array(), FALSE);
-
+				if(!$this->retranslateUdpSent){
+				    $xml .= '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<smart-house-commands>' . "\n";
+			        $xml .= "<get-shc retranslate-udp=\"yes\" />\n";
+			        $xml .= "</smart-house-commands>\n";
+					$this->retranslateUdpSent = TRUE;
+					
+	
+					$methodName = "onGetXmlLogic";
+					$callback = array($this, $methodName);
+					$this->addEventOnMsgCallback("shcxml", $callback, array(), FALSE);
+				}
 				break;
 			case 'get-shc':
 		        $xml .= '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<smart-house-commands>' . "\n";
@@ -1143,18 +1146,23 @@ class SHClient {
 
 				break;
 			case 'retranslate-udp':
-		        $xml .= '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<smart-house-commands>' . "\n";
-		        $xml .= "<get-shc retranslate-udp=\"yes\" />\n";
-		        $xml .= "</smart-house-commands>\n";
-
-				$argv = array();
-				if(!is_null($callback)) {
-					$argv[] = $callback;
+				if(!$this->retranslateUdpSent){
+			        $xml .= '<?xml version="1.0" encoding="UTF-8"?>' . "\n" . '<smart-house-commands>' . "\n";
+			        $xml .= "<get-shc retranslate-udp=\"yes\" />\n";
+			        $xml .= "</smart-house-commands>\n";
+					$this->retranslateUdpSent = TRUE;
+	
+					$argv = array();
+					if(!is_null($callback)) {
+						$argv[] = $callback;
+					}
+					$methodName = "onGetXmlLogic";
+					$callback = array($this, $methodName);
+					$this->addEventOnMsgCallback("shcxml", $callback, $argv, FALSE);
+				}elseif(!is_null($callback) && is_array($callback) && count($callback) == 2){
+					$this->stopListenEvents();
+					call_user_func($callback, $this->logicXml);
 				}
-				$methodName = "onGetXmlLogic";
-				$callback = array($this, $methodName);
-				$this->addEventOnMsgCallback("shcxml", $callback, $argv, FALSE);
-
 				break;
 		}
 
@@ -1215,7 +1223,7 @@ class SHClient {
 	}
 	
 	private function onGetXmlLogic($leftLength, $argv = NULL) {
-		$this->debug(__METHOD__);
+		//$this->debug(__METHOD__);
 		$callback = NULL;
 		if(!is_null($argv) && is_array($argv) && count($argv) > 0) $callback = $argv[0];
 
@@ -1407,6 +1415,50 @@ class SHClient {
 		
         $this->xpath = new \DOMXPath($this->xmlDoc);
     }
+
+    public function getDeviceStateByAddr($addr, $sendRequest = TRUE){
+			//$this->debug(__METHOD__);
+
+			$listenEventsDelay = $this->listenEventsDelay;
+			$this->listenEventsDelay = 0;
+
+			if(!$this->retranslateUdpSent){
+				$methodName = "stopListenEvents";
+				$callback = array($this, $methodName);
+	
+	        	$this->sendCommandToSH('retranslate-udp', $callback);
+				$this->listenEventsOnMsg();
+			}
+			
+			$methodName = "onGetDeviceEvent";
+			$callback = array($this, $methodName);
+			$argv = array("addr"=>$addr);
+			$this->addEventOnMsgCallback("dev-event", $callback, $argv);
+
+			//send request on get device state
+			list($id, $subid) = explode(":", $addr);
+            $data = $this->packData($id, 0, 14, 0, array(0,0,0,0,0,0));
+            $this->sendToServer($data);
+
+			//read device state
+			$this->listenEventsOnMsg();
+			$this->listenEventsDelay = $listenEventsDelay;
+			
+			if(array_key_exists($addr, $this->devicesStore)) return $this->devicesStore[$addr];
+			
+			return NULL;
+    }
+	
+	public function onGetDeviceEvent($data, $argv){
+		//$this->debug(__METHOD__);
+		foreach ($data as $value) {
+			if($value["addr"] == $argv["addr"]){
+				$this->stopListenEvents();
+				$this->devicesStore[$value["addr"]] = $value;
+				break;
+			}
+		}
+	}
 
 //##########################################################################################################################
 	
@@ -1628,6 +1680,7 @@ class SHClient {
 			$this->debug($msg);
             //throw new Exception ($msg);
         }
+		$this->retranslateUdpSent = FALSE;
     }
 
     private function sendToServer($data){

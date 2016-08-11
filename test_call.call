@@ -1,0 +1,6 @@
+Channel: PJSIP/6001
+MaxRetries: 0
+RetryTime: 15
+WaitTime: 15
+Application: AGI
+Data: /home/katod/projects/PHP_GSM/GSM.php,1,2,4,6,7

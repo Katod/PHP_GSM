@@ -1,0 +1,6 @@
+Channel: PJSIP/6001
+MaxRetries: 4
+RetryTime: 15
+WaitTime: 15
+Application: Playback
+Data: hello-world
