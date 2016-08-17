@@ -5,9 +5,7 @@ require('phpagi.php');
 require_once ('/home/katod/projects/PHP_GSM/api/AES128.php');
 require_once ('/home/katod/projects/PHP_GSM/api/SHClient.php');
 
-define("HOST", "192.168.1.124");
-define("PORT", 55555);
-define("SECRET_KEY","0000000000000000");
+
 define("REPEAT_TIME",50000);
 
 
@@ -32,7 +30,7 @@ class Client
     private $db ;
     private $shClient;
 
-    public function __construct($db_path,$voice_path)
+    public function __construct($db_path,$voice_path,$host,$port,$secret_key)
     {
 
         $this->db = new MyDB($db_path);
@@ -61,6 +59,7 @@ class Client
         if($_SERVER['argv'][1] != NULL)
         {
           $this->menuID = $_SERVER['argv'][1];
+          //sleep(5);
         }
         else
         {
@@ -154,11 +153,21 @@ class Client
 
               $this->agi->verbose("state=" . $state["state"] . ";\n".$type,1);
             
-             // if($state["state"] != null)
-             // {
-             //    $state["state"] = "undefined";
-             //  }
-            $this->agi->stream_file($this->pathToVoice."files/".$type."/".$state['state'],'*#');
+              if($type === '')
+              {
+                $this->agi->stream_file($this->pathToVoice."files/undefinedType",'*#');
+              }
+              else
+              {
+                $state["state"] = explode(".", $state["state"]);
+                if($state["state"][0] === '')
+                {
+                   $state["state"][0] = "undefined";
+
+                 }
+                  
+                  $this->agi->stream_file($this->pathToVoice."files/".$type."/".$state['state'][0],'*#');
+              }
             }
             else
             {
@@ -166,9 +175,9 @@ class Client
               $devices = $this->shClient->setDeviceState((int)$addr[0],(int)$addr[1],["state"=>$menu_row['device_state']]);
               $this->agi->stream_file($this->pathToVoice."files/".$type."/".$menu_row['device_state'],'*#');
             }
-
             $this->callPath = substr($this->callPath, 0, -1);
          }
+        $this->agi->verbose("POSSIBLE =".$this->getMenuPosiblePath($this->callPath),1);
         
         $digit = $this->agi->get_data($this->pathToVoice.$this->menuID."_".$this->callPath,REPEAT_TIME,1);//'1234567890*#');
 
@@ -180,6 +189,7 @@ class Client
         //}
 
         $this->agi->verbose("DIGIT =".$digit['result']." Code=".$digit['code']." data =".$digit['data'],1);
+
         if($digit['result'] == '*')
           $this->callPath = substr($this->callPath, 0, -1);
         else if($digit['result'] == '' && $digit['data'] == '')
@@ -223,13 +233,18 @@ class Client
 
      public function getMenuPosiblePath($path)
      {
-      $result = array();
+      $result = '';
       foreach ($this->menu as $key => $value) 
       {
-        if (trim($value['path']) == trim($path))
-          return $value;      
+        if (substr($value['path'],0,strlen($path)) == trim($path))
+        {
+          $sign = trim($value['path'][strlen($path)]);
+          $this->agi->verbose("pass =".strpos($result, $sign),1);
+          if(strpos($result, $sign) === false)
+            $result .=$sign;
+        } 
       }
-      return NULL; 
+      return $result; 
      }
 }
 ?>

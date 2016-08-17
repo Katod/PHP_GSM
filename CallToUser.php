@@ -1,6 +1,9 @@
 #!/usr/bin/php -q
 <?php
 {
+	//argv[1] = phone number
+	//argv[2] = application param
+
 	// If the application is having problems you can log to this file
 	$parm_error_log = '/tmp/wakeup.log';
 	
@@ -19,13 +22,14 @@
 	// Aplication name
 	$parm_application = 'AGI';
 	
+	// Aplication  param
 	$parm_data = '/home/katod/projects/PHP_GSM/GSM.php';
 
 	// How many times to try the call
 	$parm_maxretries = 2;
 	
 	// How long to keep the phone ringing
-	$parm_waittime = 10;		// How long to keep the phone ringing
+	$parm_waittime = 10;
 	
 	// Number of seconds between retries
 	$parm_retrytime = 10;
@@ -50,7 +54,7 @@
 		fputs( $wuc, "application: $parm_application\n");
 		fputs( $wuc, "data: $parm_data,$argv[2]\n");
 
-	fclose($wuc); //Закрытие
+	fclose($wuc); //close file
 
 	rename("$parm_temp_dir/$filename", "$parm_call_dir/$filename");
 
