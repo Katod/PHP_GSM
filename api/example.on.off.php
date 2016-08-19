@@ -6,9 +6,16 @@
 include_once "settings.php";
 
 $controller = new Device($globalSettings);
-$controller->setDeviceState("771:7");
-$state = $controller->getDeviceState("771:7");
-$controller->debug($state);
+//$controller->setDeviceState("771:7");
+$state = $controller->getDeviceState("531:16");
+print_r($state);
+
+echo "second";
+$state = $controller->getDeviceState("531:8");
+print_r($state);
+
+echo "finish";
+//$controller->debug($state);
 
 class Device {
 
@@ -16,7 +23,7 @@ class Device {
 	public $shClient = NULL;
 	public $itemAddr = "";
 	public $itemState = array();
-	public $debug = FALSE;
+	public $debug = TRUE;
 	public $settings = array();
 	public $logFile = "";
 

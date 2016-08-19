@@ -35,7 +35,7 @@ $globalSettings["debug"] = TRUE;
 $globalSettings["logFile"] = LOG_FILE;
 
 
-require_once BASE_DIR . 'classes/AES128.php';
-require_once BASE_DIR . 'classes/SHClient.php';
+require_once BASE_DIR . 'AES128.php';
+require_once BASE_DIR . 'SHClient.php';
 
 ?>

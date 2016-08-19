@@ -1055,7 +1055,6 @@ class SHClient {
 
     public function listenEventsOnMsg() {
     	if(!count($this->eventOnMsgCallbacks)) return false;
-    	
 		while (!$this->stopListenEventsOnMsg && $this->connected() && count($this->eventOnMsgCallbacks)) {
 			$data = $this->readBlockedSocket(10);
 	        $unpackData = @unpack("Llength/C6c", $data);
