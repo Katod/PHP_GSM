@@ -14,6 +14,7 @@ class MyDB extends SQLite3
 function cache_update($name,$text) 
 {
   $name = trim($name);
+  $text = str_replace(" ", "    ",$text);
   echo "Generating file " . $text . "\n";
   echo "NAME = ".$name."\n";
   file_put_contents("temp.wav", file_get_contents("http://s2.smarthouse.ua:8080/say_wav.php?text=".urlencode($text)));

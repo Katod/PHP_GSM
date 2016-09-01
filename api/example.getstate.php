@@ -1,4 +1,4 @@
-#!/usr/bin/php5
+#!/usr/bin/php
 <?php
 //Пример 2
 //Включить, выключить устройство
@@ -6,11 +6,13 @@
 include_once "settings.php";
 
 $controller = new Device($globalSettings);
-print_r($controller->getDeviceState("771:8"));
-sleep(3);
-print_r($controller->getDeviceState("771:7"));
-//$tmpstate = $controller->shClient->requestDeviceState((int)531, (int)16);
-//$controller->debug($state);
+//$controller->setDeviceState("771:8");
+$state = $controller->getDeviceState("771:7");
+$controller->debug($state);
+//sleep(1);
+$state = $controller->getDeviceState("771:8");
+$controller->debug($state);
+
 
 class Device {
 
@@ -18,7 +20,7 @@ class Device {
 	public $shClient = NULL;
 	public $itemAddr = "";
 	public $itemState = array();
-	public $debug = TRUE;
+	public $debug = FALSE;
 	public $settings = array();
 	public $logFile = "";
 
@@ -63,6 +65,7 @@ class Device {
     }
 
     public function getDeviceState($addr) {
+    	//$this->debug(__METHOD__ . " " . __LINE__);
     	$state = NULL;
         if(strpos($addr, ":") === FALSE) {
 			$this->error = true;

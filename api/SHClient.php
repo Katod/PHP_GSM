@@ -130,6 +130,8 @@ class SHClient {
             return FALSE;
         }
         
+        //if($this->readFromBlockedSocket) stream_set_blocking($this->connectionResource, 1);//set socket to block status
+        
         if($this->allowRetraslateUDP){
             if($this->allowReadXmlLogic){
                 $this->readXmlLogic();
@@ -195,6 +197,7 @@ class SHClient {
 		
 		$this->runSuccess = TRUE;
 		stream_set_blocking($this->connectionResource, 1);//set socket to block status
+		//$this->debug(__METHOD__ . " line:" . __LINE__);
         return TRUE;
     }
 
@@ -233,12 +236,9 @@ class SHClient {
         $tmpstate = array();
         
         $index = (int)$id . ":" . (int)$subid;
-       // if(!array_key_exists($index, $this->devicesStatesStore) || $sendRequest) {
-            if($this->runSuccess)
-            {
-                $tmpstate = $this->requestDeviceState((int)$id, (int)$subid);
-            }
-      //  }else $tmpstate = $this->devicesStatesStore[$index];
+        if(!array_key_exists($index, $this->devicesStatesStore) || $sendRequest) {
+            if($this->runSuccess) $tmpstate = $this->requestDeviceState((int)$id, (int)$subid);
+        }else $tmpstate = $this->devicesStatesStore[$index];
 
         $deviceType = $this->getItemType($id, $subid);
         $length = count($tmpstate);
@@ -1055,7 +1055,9 @@ class SHClient {
 
     public function listenEventsOnMsg() {
     	if(!count($this->eventOnMsgCallbacks)) return false;
+    	
 		while (!$this->stopListenEventsOnMsg && $this->connected() && count($this->eventOnMsgCallbacks)) {
+			//$this->debug(__METHOD__ . " line: " . __LINE__);
 			$data = $this->readBlockedSocket(10);
 	        $unpackData = @unpack("Llength/C6c", $data);
 			$leftLength = $unpackData["length"]-6;
@@ -1168,6 +1170,8 @@ class SHClient {
 		if($xml != "") {
 	        $xmlsize = strlen($xml);
 	        $data = pack("L",$xmlsize) . $xml;
+			$this->debug(__METHOD__ . " line: " . __LINE__);
+			$this->debug($xml);
 	        $this->sendToServer($data);
 
 		}
@@ -1209,9 +1213,12 @@ class SHClient {
 			$methodName = "onGetCanInfo";
 			$callback = array($this, $methodName);
 			$this->addEventOnMsgCallback("caninf", $callback);
+			$listenEventsDelay = $this->listenEventsDelay;
+			$this->listenEventsDelay = 0;
 			
 			$this->listenEventsOnMsg();
 			$serverAnswer = $this->serverAnswer;
+			$this->listenEventsDelay = $listenEventsDelay;
 		}
 
         return $serverAnswer;
@@ -1428,6 +1435,7 @@ class SHClient {
 	        	$this->sendCommandToSH('retranslate-udp', $callback);
 				$this->listenEventsOnMsg();
 			}
+			//$this->debug(__METHOD__ . " line: " . __LINE__);
 			
 			$methodName = "onGetDeviceEvent";
 			$callback = array($this, $methodName);
@@ -1442,6 +1450,7 @@ class SHClient {
 			//read device state
 			$this->listenEventsOnMsg();
 			$this->listenEventsDelay = $listenEventsDelay;
+			$this->removeEventOnMsgCallback("dev-event");
 			
 			if(array_key_exists($addr, $this->devicesStore)) return $this->devicesStore[$addr];
 			
@@ -1453,6 +1462,7 @@ class SHClient {
 		foreach ($data as $value) {
 			if($value["addr"] == $argv["addr"]){
 				$this->stopListenEvents();
+				//$this->debug($value);
 				$this->devicesStore[$value["addr"]] = $value;
 				break;
 			}
@@ -1670,6 +1680,7 @@ class SHClient {
     }
 
     private function connectToServer(){
+    	$this->debug(__METHOD__ . " line:" . __LINE__);
         if (!($this->connectionResource = @fsockopen($this->host, $this->port, $errno, $errstr, $this->connectionTimeOut))) {
             $result = $errno . " " . $errstr;
             $this->logger($result);
@@ -1690,6 +1701,7 @@ class SHClient {
                     $this->logger("Couldn't write to socket data: " . $data);
                     $msg = __METHOD__ . " line: " . __LINE__ . " Couldn't write to socket data";
                     $this->errors[] = $msg;
+					$this->debug($msg);
                     //throw new Exception ($msg);
                 }
             } catch(Exception $e){
@@ -1697,6 +1709,7 @@ class SHClient {
                 $this->logger("Exception appeared. Couldn't write to socket next data: " . $data);
                 $msg = __METHOD__ . " line: " . __LINE__ . " " . "Exception appeared. Couldn't write to socket data. " . $e->getMessage();
                 $this->errors[] = $msg;
+				$this->debug($msg);
                 //throw new Exception ($msg);
             }
         }

@@ -23,7 +23,7 @@ class Client
     private $pathToVoice = '';
     private $menuID = '';
     private $callPath = '';
-    private $posiblePath ='*#';
+    private $posiblePath = '';
     private $pincode = '';
 
     public $menu = array();
@@ -77,7 +77,7 @@ class Client
             else
             {
               // PIN CODE CHECK 
-              $r=$this->agi->get_data('hello-world',14000,6); // Add voice enter pin 
+              $r=$this->agi->get_data($this->pathToVoice."files/ENTER_PIN",REPEAT_TIME,6); //need add to voice 
               $this->agi->verbose("Result = ".$r['result'],1);
 
               $ret = $this->db->query("SELECT id FROM clients WHERE PIN = ".$r['result'].";\n");
@@ -92,6 +92,7 @@ class Client
               else
               {
                  $this->agi->verbose("WRONG PIN",1);
+                 $this->agi->stream_file($this->pathToVoice."files/WRONG_PIN"); //need add to voice 
               }
             }
          }
@@ -118,7 +119,7 @@ class Client
               else 
               {
                 $this->agi->verbose("Error connect\n",1);
-                $this->agi->stream_file($this->pathToVoice."files/".$type."/"."CONNECT_ERROR");
+                $this->agi->stream_file($this->pathToVoice."files/CONNECT_ERROR"); //need add to voice 
                 //$this->agi->hangup();
               }
           }
@@ -146,24 +147,24 @@ class Client
          if($menu_row['addr'] != '')
          {
            $addr = explode(":", $menu_row['addr']);
-           $type = $this->shClient->getItemType($addr[0], $addr[1]);
+           $state = $this->shClient->getDeviceStateByAddr($menu_row['addr'],TRUE);
+           $this->agi->verbose("type=".$type,1);
             if($menu_row['device_state'] == '')
             {
 
-              //$this->shClient->run2();
-              //sleep(3);
-              $state = $this->shClient->getDeviceStateByAddr($menu_row['addr'],TRUE);
-             // $state = $this->shClient->getDeviceState($addr[0],$addr[1],TRUE);
-
-              $this->agi->verbose("state=" . $state["values"][0] . ";\n".$type,1);
+              $this->shClient->run2();
+              sleep(1);
             
+              $state = $this->shClient->getDeviceStateByAddr($menu_row['addr'],TRUE);
+              $this->agi->verbose("state=" . $state["values"][0]. ";\n".$type,1);
+              
               if($state["type"] === '')
               {
                 $this->agi->stream_file($this->pathToVoice."files/undefinedType",'*#');
               }
               else
               {
-                $state["values"] = explode(".", $state["values"][0]);
+               $state["values"] = explode(".", $state["values"][0]);
                 if($state["values"][0] === '')
                 {
                    $state["values"][0] = "undefined";
@@ -175,11 +176,11 @@ class Client
             {
               //$this->agi->verbose("Id =".$addr[0]."sub-Id =".$addr[1]." state =".$menu_row['device_state'],1);
               $devices = $this->shClient->setDeviceState((int)$addr[0],(int)$addr[1],["state"=>$menu_row['device_state']]);
-              $this->agi->stream_file($this->pathToVoice."files/".$type."/".$menu_row['device_state'],'*#');
+              $this->agi->stream_file($this->pathToVoice."files/".$state["type"]."/".$menu_row['device_state'],'*#');
             }
             $this->callPath = substr($this->callPath, 0, -1);
          }
-        $this->posiblePath.= $this->getMenuPosiblePath($this->callPath);
+        $this->posiblePath = $this->getMenuPosiblePath($this->callPath).'*#';
 
         $this->agi->verbose("POSSIBLE =".$this->getMenuPosiblePath($this->callPath),1);
         
